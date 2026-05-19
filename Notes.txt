@@ -1,0 +1,9 @@
+Fix lag (maybe reduce grid size), also make it more responsive. Tiles and walls get skipped when moved too fast
+
+Make labels work like staircase buttons. 
+
+Add a type for "center" which will mark the center for each map. Using the staircase arrow for up and down overrides the center point.
+
+make undo and redo feature work as a single stroke. Not tile by tile.
+
+make paint work by drawing rectangles. Like in windows desktop.
