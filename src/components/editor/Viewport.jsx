@@ -220,9 +220,8 @@ export default function Viewport() {
       if (centerX < -100 || centerX > W + 100) continue
       if (centerY < -100 || centerY > H + 100) continue
 
-      const groupArea = groupW * groupH
-      const baseFontSize = Math.sqrt(groupArea) * ts * 0.18
-      const fontSize = clamp(baseFontSize, 8, ts * groupW * 0.5)
+      const maxWidth = Math.max((groupW * ts) - 4, 1)
+      const fontSize = clamp(12 * z, 8, 16)
 
       const text = room.number
         ? `${room.number}${room.name ? ' · ' + room.name : ''}`
@@ -233,9 +232,9 @@ export default function Viewport() {
       ctx.textAlign = 'center'
       ctx.textBaseline = 'middle'
       ctx.fillStyle = 'rgba(0,0,0,0.15)'
-      ctx.fillText(text, centerX + 1, centerY + 1)
+      ctx.fillText(text, centerX + 1, centerY + 1, maxWidth)
       ctx.fillStyle = 'rgba(0,0,0,0.7)'
-      ctx.fillText(text, centerX, centerY)
+      ctx.fillText(text, centerX, centerY, maxWidth)
       ctx.restore()
     }
 

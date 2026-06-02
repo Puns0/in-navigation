@@ -183,9 +183,8 @@ export default function MapViewer({ mode, selectedRoomId, onRoomSelect, selected
       if (centerX < -100 || centerX > W + 100) continue
       if (centerY < -100 || centerY > H + 100) continue
 
-      const groupArea = groupW * groupH
-      const baseFontSize = Math.sqrt(groupArea) * ts * 0.22
-      const fontSize = clamp(baseFontSize, 10, ts * groupW * 0.5)
+      const maxWidth = Math.max((groupW * ts) - 4, 1)
+      const fontSize = clamp(12 * z, 8, 16)
 
       const text = room.number
         ? `${room.number}${room.name ? ' · ' + room.name : ''}`
@@ -197,10 +196,10 @@ export default function MapViewer({ mode, selectedRoomId, onRoomSelect, selected
       ctx.textBaseline = 'middle'
       
       ctx.fillStyle = 'rgba(0,0,0,0.15)'
-      ctx.fillText(text, centerX + 1, centerY + 1)
+      ctx.fillText(text, centerX + 1, centerY + 1, maxWidth)
       
       ctx.fillStyle = room.id === selectedRoomId && mode === 'rooms' ? '#fff' : 'rgba(255,255,255,0.9)'
-      ctx.fillText(text, centerX, centerY)
+      ctx.fillText(text, centerX, centerY, maxWidth)
       ctx.restore()
     }
   }, [selectedRoomId, mode])
