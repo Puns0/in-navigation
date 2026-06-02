@@ -1,106 +1,93 @@
 import { create } from 'zustand'
+import { generateId } from '../utils/id'
+import { buildCellIndex } from '../utils/cellIndex'
 
+// ── Constants ──────────────────────────────────────────────────────────────
 const COLS = 100
 const ROWS = 100
+const MAX_HISTORY = 50
 
-const makeEmptyGrid = () =>
-  Array.from({ length: ROWS }, (_, r) =>
-    Array.from({ length: COLS }, (_, c) => ({
-      row: r,
-      col: c,
-      type: 'empty',
-    }))
-  )
+export { COLS, ROWS }
 
-const makeFloor = (id) => ({
-  id,
-  label: getFloorLabel(id),
-  grid: makeEmptyGrid(),
-  walls: {},
-  nodes: [],
-  edges: [],
-  tileGroups: [],
-})
-
-export const getFloorLabel = (id) => {
+// ── Floor factory ──────────────────────────────────────────────────────────
+export function getFloorLabel(id) {
   if (id === 0) return 'Ground'
   if (id > 0) return `Floor ${id}`
   return `Basement ${Math.abs(id)}`
 }
 
-const findTileGroups = (grid) => {
-  const visited = new Set()
-  const groups = []
-  const getKey = (r, c) => `${r},${c}`
-  const neighbors = (r, c) => [
-    [r - 1, c], [r + 1, c], [r, c - 1], [r, c + 1]
-  ]
-
-  for (let r = 0; r < grid.length; r++) {
-    for (let c = 0; c < grid[0].length; c++) {
-      const cell = grid[r][c]
-      if (cell.type === 'empty') continue
-      const key = getKey(r, c)
-      if (visited.has(key)) continue
-
-      const group = []
-      const queue = [[r, c]]
-      visited.add(key)
-
-      while (queue.length) {
-        const [cr, cc] = queue.shift()
-        group.push({ row: cr, col: cc })
-        for (const [nr, nc] of neighbors(cr, cc)) {
-          const nkey = getKey(nr, nc)
-          if (
-            nr >= 0 && nr < grid.length &&
-            nc >= 0 && nc < grid[0].length &&
-            grid[nr][nc].type === cell.type &&
-            !visited.has(nkey)
-          ) {
-            visited.add(nkey)
-            queue.push([nr, nc])
-          }
-        }
-      }
-
-      const minRow = Math.min(...group.map(t => t.row))
-      const maxRow = Math.max(...group.map(t => t.row))
-      const minCol = Math.min(...group.map(t => t.col))
-      const maxCol = Math.max(...group.map(t => t.col))
-      const id = `${cell.type}_${getKey(minRow, minCol)}`
-
-      groups.push({
-        id,
-        type: cell.type,
-        tiles: group,
-        minRow, maxRow, minCol, maxCol,
-        label: null,
-      })
-    }
+function makeFloor(id) {
+  return {
+    id,
+    label: getFloorLabel(id),
+    rooms: [],
+    walls: {},
+    nodes: [],
+    edges: [],
+    markers: [],
   }
-
-  return groups
 }
 
-const MAX_HISTORY = 50
-
+// ── Deep clone helper ──────────────────────────────────────────────────────
 const cloneFloors = (floors) => JSON.parse(JSON.stringify(floors))
 
+// ── Store ──────────────────────────────────────────────────────────────────
 export const useMapStore = create((set, get) => ({
+  // ── State ────────────────────────────────────────────────────────────────
   floors: [makeFloor(0)],
   activeFloorId: 0,
   activeTool: 'paint',
-  activeTileType: 'room',
+  activeRoomType: 'room',
+  activeNodeType: 'hallway',
+  activeMarkerType: 'info',
   selectedNodeId: null,
+  selectedRoomId: null,
+  selectedMarkerId: null,
+  events: [],
+
+  // Stroke-in-progress: cells being painted before mouseUp finalizes the room
+  pendingStroke: null, // { type, cells: [{row,col}] } or null
+
+  // Marquee selection
+  marqueeSelection: null, // { startRow, startCol, endRow, endCol } or null
+
+  // History (stroke-level)
   history: [],
   future: [],
 
-  // ── Undo / Redo ─────────────────────────────────────────
-  _pushHistory: () => {
+  // Cell index cache — rebuilt when rooms change
+  _cellIndex: new Map(),
+  _cellIndexFloorId: null,
+
+  // ── Cell index ───────────────────────────────────────────────────────────
+  getCellIndex: () => {
+    const { floors, activeFloorId, _cellIndex, _cellIndexFloorId } = get()
+    const floor = floors.find(f => f.id === activeFloorId)
+    if (!floor) return new Map()
+    // Rebuild if stale
+    if (_cellIndexFloorId !== activeFloorId || _cellIndex._roomCount !== floor.rooms.length) {
+      const idx = buildCellIndex(floor.rooms)
+      idx._roomCount = floor.rooms.length
+      set({ _cellIndex: idx, _cellIndexFloorId: activeFloorId })
+      return idx
+    }
+    return _cellIndex
+  },
+
+  rebuildCellIndex: () => {
+    const { floors, activeFloorId } = get()
+    const floor = floors.find(f => f.id === activeFloorId)
+    if (!floor) return
+    const idx = buildCellIndex(floor.rooms)
+    idx._roomCount = floor.rooms.length
+    set({ _cellIndex: idx, _cellIndexFloorId: activeFloorId })
+  },
+
+  // ── Undo / Redo (stroke-level) ──────────────────────────────────────────
+  beginStroke: () => {
     const { floors, history } = get()
     set({
-      history: [...history.slice(-MAX_HISTORY + 1), cloneFloors(floors)],
+      history: [...history.slice(-(MAX_HISTORY - 1)), cloneFloors(floors)],
       future: [],
     })
   },
@@ -108,96 +95,296 @@ export const useMapStore = create((set, get) => ({
   undo: () => {
     const { history, floors, future } = get()
     if (!history.length) return
+    const prev = history[history.length - 1]
     set({
-      floors: history[history.length - 1],
+      floors: prev,
       history: history.slice(0, -1),
       future: [cloneFloors(floors), ...future.slice(0, MAX_HISTORY - 1)],
+      pendingStroke: null,
     })
+    get().rebuildCellIndex()
   },
 
   redo: () => {
     const { future, floors, history } = get()
     if (!future.length) return
+    const next = future[0]
     set({
-      floors: future[0],
+      floors: next,
       future: future.slice(1),
-      history: [...history.slice(-MAX_HISTORY + 1), cloneFloors(floors)],
+      history: [...history.slice(-(MAX_HISTORY - 1)), cloneFloors(floors)],
+      pendingStroke: null,
+    })
+    get().rebuildCellIndex()
+  },
+
+  // ── Getters ──────────────────────────────────────────────────────────────
+  getActiveFloor: () => {
+    const { floors, activeFloorId } = get()
+    return floors.find(f => f.id === activeFloorId) || null
+  },
+
+  getRoomById: (roomId) => {
+    const floor = get().getActiveFloor()
+    if (!floor) return null
+    return floor.rooms.find(r => r.id === roomId) || null
+  },
+
+  getRoomAtCell: (row, col) => {
+    const cellIndex = get().getCellIndex()
+    const roomId = cellIndex.get(`${row},${col}`)
+    if (!roomId) return null
+    return get().getRoomById(roomId)
+  },
+
+  // ── Tool setters ─────────────────────────────────────────────────────────
+  setActiveTool: (tool) => set({
+    activeTool: tool,
+    selectedNodeId: null,
+    selectedRoomId: null,
+    selectedMarkerId: null,
+    pendingStroke: null,
+    marqueeSelection: null,
+  }),
+
+  setActiveRoomType: (type) => set({ activeRoomType: type }),
+  setActiveNodeType: (type) => set({ activeNodeType: type }),
+  setActiveMarkerType: (type) => set({ activeMarkerType: type }),
+  setSelectedNode: (id) => set({ selectedNodeId: id }),
+  setSelectedRoom: (id) => set({ selectedRoomId: id }),
+  setSelectedMarker: (id) => set({ selectedMarkerId: id }),
+
+  // ── Floor management ─────────────────────────────────────────────────────
+  setActiveFloor: (id) => set({
+    activeFloorId: id,
+    selectedNodeId: null,
+    selectedRoomId: null,
+    selectedMarkerId: null,
+    pendingStroke: null,
+    marqueeSelection: null,
+  }),
+
+  addFloor: (direction) => {
+    const { floors } = get()
+    const sorted = [...floors].sort((a, b) => a.id - b.id)
+    let newId
+    if (direction === 'up') {
+      newId = sorted.length ? sorted[sorted.length - 1].id + 1 : 1
+    } else {
+      newId = sorted.length ? sorted[0].id - 1 : -1
+    }
+    const newFloor = makeFloor(newId)
+    set({
+      floors: [...floors, newFloor].sort((a, b) => a.id - b.id),
+      activeFloorId: newId,
     })
   },
 
-  // ── Getters ─────────────────────────────────────────────
-  getActiveFloor: () => {
+  removeFloor: (floorId) => {
     const { floors, activeFloorId } = get()
-    return floors.find(f => f.id === activeFloorId)
+    if (floors.length <= 1) return // must keep at least one floor
+    const remaining = floors.filter(f => f.id !== floorId)
+    const newActive = activeFloorId === floorId
+      ? remaining[0].id
+      : activeFloorId
+    set({ floors: remaining, activeFloorId: newActive })
   },
 
-  // ── Tools ───────────────────────────────────────────────
-  setActiveTool: (tool) => set({ activeTool: tool, selectedNodeId: null }),
-  setActiveTileType: (type) => set({ activeTileType: type }),
-  setActiveFloor: (id) => set({ activeFloorId: id, selectedNodeId: null }),
+  // ── Staircase navigation ─────────────────────────────────────────────────
+  navigateStaircase: (roomId, direction) => {
+    const { floors, activeFloorId } = get()
+    const currentFloor = floors.find(f => f.id === activeFloorId)
+    if (!currentFloor) return
 
-  // ── Paint ───────────────────────────────────────────────
-  paintTile: (row, col) => {
-    const { floors, activeFloorId, activeTool, activeTileType, _pushHistory } = get()
-    _pushHistory()
+    const staircaseRoom = currentFloor.rooms.find(r => r.id === roomId)
+    if (!staircaseRoom || staircaseRoom.type !== 'staircase') return
+
+    const sorted = [...floors].sort((a, b) => a.id - b.id)
+    const currentIndex = sorted.findIndex(f => f.id === activeFloorId)
+
+    let targetFloor
+    let updatedFloors = [...floors]
+
+    if (direction === 'up') {
+      const next = sorted[currentIndex + 1]
+      if (next) {
+        targetFloor = next
+      } else {
+        // Create a new floor above
+        const newId = currentFloor.id + 1
+        targetFloor = makeFloor(newId)
+        updatedFloors = [...updatedFloors, targetFloor].sort((a, b) => a.id - b.id)
+      }
+    } else {
+      const prev = sorted[currentIndex - 1]
+      if (prev) {
+        targetFloor = prev
+      } else {
+        // Create a new floor below (basement)
+        const newId = currentFloor.id - 1
+        targetFloor = makeFloor(newId)
+        updatedFloors = [...updatedFloors, targetFloor].sort((a, b) => a.id - b.id)
+      }
+    }
+
+    // Copy staircase geometry to target floor if no staircase already exists there
+    const cellSet = new Set(staircaseRoom.geometry.map(c => `${c.row},${c.col}`))
+    const existingStaircase = targetFloor.rooms.find(r =>
+      r.type === 'staircase' &&
+      r.geometry.some(c => cellSet.has(`${c.row},${c.col}`))
+    )
+
+    if (!existingStaircase) {
+      const newRoom = {
+        id: generateId('room'),
+        floorId: targetFloor.id,
+        name: staircaseRoom.name,
+        number: staircaseRoom.number,
+        type: 'staircase',
+        geometry: [...staircaseRoom.geometry.map(c => ({ ...c }))],
+        labelAnchor: null,
+        entryPoint: null,
+        metadata: {},
+      }
+      updatedFloors = updatedFloors.map(f => {
+        if (f.id !== targetFloor.id) return f
+        return { ...f, rooms: [...f.rooms, newRoom] }
+      })
+    }
+
+    set({
+      floors: updatedFloors,
+      activeFloorId: targetFloor.id,
+    })
+    get().rebuildCellIndex()
+  },
+
+  // ── Paint stroke lifecycle ───────────────────────────────────────────────
+  startPaintStroke: (type) => {
+    set({ pendingStroke: { type, cells: [] } })
+  },
+
+  addPendingCells: (newCells) => {
+    const { pendingStroke } = get()
+    if (!pendingStroke) return
+
+    // Deduplicate: only add cells not already in pending
+    const existing = new Set(pendingStroke.cells.map(c => `${c.row},${c.col}`))
+    const unique = newCells.filter(c => {
+      const key = `${c.row},${c.col}`
+      if (existing.has(key)) return false
+      existing.add(key)
+      return true
+    })
+
+    if (unique.length === 0) return
+
+    set({
+      pendingStroke: {
+        ...pendingStroke,
+        cells: [...pendingStroke.cells, ...unique],
+      },
+    })
+  },
+
+  finalizePaintStroke: () => {
+    const { pendingStroke, floors, activeFloorId } = get()
+    if (!pendingStroke || pendingStroke.cells.length === 0) {
+      set({ pendingStroke: null })
+      return
+    }
+
+    const roomId = generateId('room')
+    const newRoom = {
+      id: roomId,
+      floorId: activeFloorId,
+      name: '',
+      number: '',
+      type: pendingStroke.type,
+      geometry: [...pendingStroke.cells],
+      labelAnchor: null,
+      entryPoint: null,
+      metadata: {},
+    }
+
+    // Remove painted cells from any existing rooms
+    const cellSet = new Set(pendingStroke.cells.map(c => `${c.row},${c.col}`))
+
     set({
       floors: floors.map(floor => {
         if (floor.id !== activeFloorId) return floor
-        const newGrid = floor.grid.map(r => r.map(cell => {
-          if (cell.row === row && cell.col === col) {
-            return { ...cell, type: activeTool === 'erase' ? 'empty' : activeTileType }
-          }
-          return cell
-        }))
-        // Preserve existing labels when regrouping
-        const oldGroups = floor.tileGroups
-        const newGroups = findTileGroups(newGrid).map(newGroup => {
-          // Try to find a matching old group by overlapping tiles
-          const match = oldGroups.find(og =>
-            og.type === newGroup.type &&
-            og.tiles.some(t =>
-              newGroup.tiles.some(nt => nt.row === t.row && nt.col === t.col)
-            )
-          )
-          return match?.label ? { ...newGroup, label: match.label } : newGroup
-        })
-        return { ...floor, grid: newGrid, tileGroups: newGroups }
-      })
+        // Strip cells from existing rooms
+        const updatedRooms = floor.rooms
+          .map(room => ({
+            ...room,
+            geometry: room.geometry.filter(c => !cellSet.has(`${c.row},${c.col}`)),
+          }))
+          .filter(room => room.geometry.length > 0) // Remove empty rooms
+        return {
+          ...floor,
+          rooms: [...updatedRooms, newRoom],
+        }
+      }),
+      pendingStroke: null,
     })
+    get().rebuildCellIndex()
   },
 
-  // ── Group label ─────────────────────────────────────────
-  setGroupLabel: (groupId, labelData) => {
-    const { floors, activeFloorId, _pushHistory } = get()
-    _pushHistory()
+  // ── Erase ────────────────────────────────────────────────────────────────
+  eraseCells: (cells) => {
+    const { floors, activeFloorId } = get()
+    const cellSet = new Set(cells.map(c => `${c.row},${c.col}`))
+
+    set({
+      floors: floors.map(floor => {
+        if (floor.id !== activeFloorId) return floor
+        const updatedRooms = floor.rooms
+          .map(room => ({
+            ...room,
+            geometry: room.geometry.filter(c => !cellSet.has(`${c.row},${c.col}`)),
+          }))
+          .filter(room => room.geometry.length > 0)
+        return { ...floor, rooms: updatedRooms }
+      }),
+    })
+    get().rebuildCellIndex()
+  },
+
+  // ── Room CRUD ────────────────────────────────────────────────────────────
+  updateRoom: (roomId, patch) => {
+    const { floors, activeFloorId } = get()
     set({
       floors: floors.map(floor => {
         if (floor.id !== activeFloorId) return floor
         return {
           ...floor,
-          tileGroups: floor.tileGroups.map(g =>
-            g.id === groupId ? { ...g, label: labelData } : g
+          rooms: floor.rooms.map(room =>
+            room.id === roomId ? { ...room, ...patch } : room
           ),
         }
-      })
+      }),
     })
   },
 
-  // Find which group a tile belongs to
-  getGroupAtTile: (row, col) => {
+  deleteRoom: (roomId) => {
     const { floors, activeFloorId } = get()
-    const floor = floors.find(f => f.id === activeFloorId)
-    if (!floor) return null
-    return floor.tileGroups.find(g =>
-      g.tiles.some(t => t.row === row && t.col === col)
-    ) || null
+    set({
+      floors: floors.map(floor => {
+        if (floor.id !== activeFloorId) return floor
+        return {
+          ...floor,
+          rooms: floor.rooms.filter(r => r.id !== roomId),
+        }
+      }),
+      selectedRoomId: null,
+    })
+    get().rebuildCellIndex()
   },
 
-  // ── Walls ───────────────────────────────────────────────
+  // ── Walls ────────────────────────────────────────────────────────────────
   toggleWall: (row, col, direction, forceRemove = false) => {
-    const { floors, activeFloorId, _pushHistory } = get()
+    const { floors, activeFloorId } = get()
     const key = `${row},${col},${direction}`
-    _pushHistory()
     set({
       floors: floors.map(floor => {
         if (floor.id !== activeFloorId) return floor
@@ -208,32 +395,36 @@ export const useMapStore = create((set, get) => ({
           newWalls[key] = true
         }
         return { ...floor, walls: newWalls }
-      })
+      }),
     })
   },
 
-  // ── Nodes ───────────────────────────────────────────────
-  placeNode: (row, col) => {
-    const { floors, activeFloorId, _pushHistory } = get()
+  // ── Navigation Nodes ─────────────────────────────────────────────────────
+  placeNode: (row, col, type) => {
+    const { floors, activeFloorId } = get()
     const floor = floors.find(f => f.id === activeFloorId)
     if (!floor) return
+    // Prevent duplicate at same cell
     if (floor.nodes.find(n => n.row === row && n.col === col)) return
-    _pushHistory()
+
     const newNode = {
-      id: `node_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-      row, col,
+      id: generateId('node'),
+      row,
+      col,
+      type: type || get().activeNodeType,
+      label: null,
+      roomId: null,
     }
     set({
       floors: floors.map(f => {
         if (f.id !== activeFloorId) return f
         return { ...f, nodes: [...f.nodes, newNode] }
-      })
+      }),
     })
   },
 
   removeNode: (nodeId) => {
-    const { floors, activeFloorId, _pushHistory } = get()
-    _pushHistory()
+    const { floors, activeFloorId } = get()
     set({
       floors: floors.map(floor => {
         if (floor.id !== activeFloorId) return floor
@@ -242,109 +433,138 @@ export const useMapStore = create((set, get) => ({
           nodes: floor.nodes.filter(n => n.id !== nodeId),
           edges: floor.edges.filter(e => e.from !== nodeId && e.to !== nodeId),
         }
-      })
+      }),
     })
   },
 
-  // ── Edges ───────────────────────────────────────────────
+  updateNode: (nodeId, patch) => {
+    const { floors, activeFloorId } = get()
+    set({
+      floors: floors.map(floor => {
+        if (floor.id !== activeFloorId) return floor
+        return {
+          ...floor,
+          nodes: floor.nodes.map(n => n.id === nodeId ? { ...n, ...patch } : n),
+        }
+      }),
+    })
+  },
+
+  // ── Navigation Edges ─────────────────────────────────────────────────────
   connectNodes: (fromId, toId) => {
-    const { floors, activeFloorId, _pushHistory } = get()
     if (fromId === toId) return
+    const { floors, activeFloorId } = get()
     const floor = floors.find(f => f.id === activeFloorId)
     if (!floor) return
+    // Prevent duplicate edges
     const exists = floor.edges.find(
       e => (e.from === fromId && e.to === toId) ||
            (e.from === toId && e.to === fromId)
     )
     if (exists) return
-    _pushHistory()
+
     set({
       floors: floors.map(f => {
         if (f.id !== activeFloorId) return f
         return {
           ...f,
           edges: [...f.edges, {
-            id: `edge_${Date.now()}`,
+            id: generateId('edge'),
             from: fromId,
             to: toId,
+            weight: null,
           }],
         }
-      })
+      }),
     })
   },
 
   removeEdge: (edgeId) => {
-    const { floors, activeFloorId, _pushHistory } = get()
-    _pushHistory()
+    const { floors, activeFloorId } = get()
     set({
       floors: floors.map(floor => {
         if (floor.id !== activeFloorId) return floor
         return { ...floor, edges: floor.edges.filter(e => e.id !== edgeId) }
-      })
+      }),
     })
   },
 
-  setSelectedNode: (id) => set({ selectedNodeId: id }),
-
-  // ── Staircases ──────────────────────────────────────────
-  navigateStaircase: (row, col, direction) => {
+  // ── Markers ──────────────────────────────────────────────────────────────
+  placeMarker: (row, col, type) => {
     const { floors, activeFloorId } = get()
-    const sorted = [...floors].sort((a, b) => a.id - b.id)
-    const currentFloor = floors.find(f => f.id === activeFloorId)
-    const currentIndex = sorted.findIndex(f => f.id === activeFloorId)
+    const floor = floors.find(f => f.id === activeFloorId)
+    if (!floor) return
+    // Prevent duplicate at same cell
+    if (floor.markers.find(m => m.row === row && m.col === col)) return
 
-    const migrate = (newFloor) => {
-      const group = currentFloor.tileGroups.find(g =>
-        g.type === 'staircase' &&
-        g.tiles.some(t => t.row === row && t.col === col)
-      )
-      const tilesToCopy = group ? group.tiles : [{ row, col }]
-      tilesToCopy.forEach(({ row: r, col: c }) => {
-        newFloor.grid[r][c].type = 'staircase'
-      })
-      newFloor.tileGroups = findTileGroups(newFloor.grid)
-      return newFloor
+    const newMarker = {
+      id: generateId('marker'),
+      row,
+      col,
+      type: type || get().activeMarkerType,
+      label: null,
+      targetFloorId: null,
     }
-
-    if (direction === 'up') {
-      const next = sorted[currentIndex + 1]
-      if (next) {
-        set({ activeFloorId: next.id })
-      } else {
-        const newId = currentFloor.id + 1
-        const newFloor = migrate(makeFloor(newId))
-        set({
-          floors: [...floors, newFloor].sort((a, b) => a.id - b.id),
-          activeFloorId: newId,
-        })
-      }
-    } else {
-      const prev = sorted[currentIndex - 1]
-      if (prev) {
-        set({ activeFloorId: prev.id })
-      } else {
-        const newId = currentFloor.id - 1
-        const newFloor = migrate(makeFloor(newId))
-        set({
-          floors: [...floors, newFloor].sort((a, b) => a.id - b.id),
-          activeFloorId: newId,
-        })
-      }
-    }
+    set({
+      floors: floors.map(f => {
+        if (f.id !== activeFloorId) return f
+        return { ...f, markers: [...f.markers, newMarker] }
+      }),
+    })
   },
 
-  // ── Save / Load ─────────────────────────────────────────
+  removeMarker: (markerId) => {
+    const { floors, activeFloorId } = get()
+    set({
+      floors: floors.map(floor => {
+        if (floor.id !== activeFloorId) return floor
+        return { ...floor, markers: floor.markers.filter(m => m.id !== markerId) }
+      }),
+    })
+  },
+
+  updateMarker: (markerId, patch) => {
+    const { floors, activeFloorId } = get()
+    set({
+      floors: floors.map(floor => {
+        if (floor.id !== activeFloorId) return floor
+        return {
+          ...floor,
+          markers: floor.markers.map(m => m.id === markerId ? { ...m, ...patch } : m),
+        }
+      }),
+    })
+  },
+
+  // ── Marquee ──────────────────────────────────────────────────────────────
+  setMarqueeSelection: (sel) => set({ marqueeSelection: sel }),
+
+  // ── Events ───────────────────────────────────────────────────────────────
+  addEvent: (event) => set((state) => ({ events: [...state.events, event] })),
+  updateEvent: (id, updates) => set((state) => ({
+    events: state.events.map(e => e.id === id ? { ...e, ...updates } : e)
+  })),
+  deleteEvent: (id) => set((state) => ({
+    events: state.events.filter(e => e.id !== id)
+  })),
+
+  // ── Save / Load ──────────────────────────────────────────────────────────
   saveToLocalStorage: () => {
-    const { floors } = get()
-    localStorage.setItem('indoor_nav_map', JSON.stringify(floors))
+    const { floors, events } = get()
+    localStorage.setItem('indoor_nav_map_v2', JSON.stringify({ floors, events }))
   },
 
   loadFromLocalStorage: () => {
-    const raw = localStorage.getItem('indoor_nav_map')
+    const raw = localStorage.getItem('indoor_nav_map_v2')
     if (!raw) return false
     try {
-      const floors = JSON.parse(raw)
-      set({ floors, activeFloorId: floors[0]?.id ?? 0, history: [], future: [] })
+      const parsed = JSON.parse(raw)
+      const isLegacy = Array.isArray(parsed)
+      const floors = isLegacy ? parsed : parsed.floors
+      const events = isLegacy ? [] : (parsed.events || [])
+      
+      set({ floors, events, activeFloorId: floors[0]?.id ?? 0, history: [], future: [] })
+      get().rebuildCellIndex()
       return true
     } catch {
       return false
@@ -352,8 +572,8 @@ export const useMapStore = create((set, get) => ({
   },
 
   exportJSON: () => {
-    const { floors } = get()
-    const blob = new Blob([JSON.stringify(floors, null, 2)], { type: 'application/json' })
+    const { floors, events } = get()
+    const blob = new Blob([JSON.stringify({ floors, events }, null, 2)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
@@ -366,8 +586,13 @@ export const useMapStore = create((set, get) => ({
     const reader = new FileReader()
     reader.onload = (e) => {
       try {
-        const floors = JSON.parse(e.target.result)
-        set({ floors, activeFloorId: floors[0]?.id ?? 0, history: [], future: [] })
+        const parsed = JSON.parse(e.target.result)
+        const isLegacy = Array.isArray(parsed)
+        const floors = isLegacy ? parsed : parsed.floors
+        const events = isLegacy ? [] : (parsed.events || [])
+
+        set({ floors, events, activeFloorId: floors[0]?.id ?? 0, history: [], future: [] })
+        get().rebuildCellIndex()
       } catch {
         alert('Invalid map file.')
       }
@@ -375,3 +600,14 @@ export const useMapStore = create((set, get) => ({
     reader.readAsText(file)
   },
 }))
+
+// ── Auto-save ──────────────────────────────────────────────────────────────
+let saveTimeout = null
+useMapStore.subscribe((state, prevState) => {
+  if (state.floors !== prevState.floors || state.events !== prevState.events) {
+    if (saveTimeout) clearTimeout(saveTimeout)
+    saveTimeout = setTimeout(() => {
+      localStorage.setItem('indoor_nav_map_v2', JSON.stringify({ floors: state.floors, events: state.events }))
+    }, 2000)
+  }
+})

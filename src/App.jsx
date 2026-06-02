@@ -1,25 +1,35 @@
-import Sidebar from './components/editor/SideBar'
-import Grid from './components/editor/Grid'
-import FloorBar from './components/editor/FloorBar'
+import { useEffect } from 'react'
+import { useMapStore } from './store/useMapStore'
+import { useAppStore } from './store/useAppStore'
+import AppShell from './components/shell/AppShell'
+import DashboardPage from './pages/DashboardPage'
+import EditorPage from './pages/EditorPage'
+import ManageRoomsPage from './pages/ManageRoomsPage'
+import ManageEventsPage from './pages/ManageEventsPage'
+import NavigationPage from './pages/NavigationPage'
+import MobileAppPage from './pages/mobile/MobileAppPage'
 
 export default function App() {
+  const { loadFromLocalStorage } = useMapStore()
+  const { currentPage } = useAppStore()
+
+  // Load saved data on initial mount
+  useEffect(() => {
+    loadFromLocalStorage()
+    loadFromLocalStorage()
+  }, [])
+
+  if (currentPage === 'preview') {
+    return <MobileAppPage />
+  }
+
   return (
-    <div className="flex flex-col h-screen w-screen overflow-hidden bg-white">
-      
-      {/* Top bar */}
-      <div className="h-12 bg-gray-900 text-white flex items-center px-4 text-sm font-semibold flex-shrink-0">
-        Indoor Nav — Map Editor
-      </div>
-
-      {/* Floor switcher */}
-      <FloorBar />
-
-      {/* Main area */}
-      <div className="flex flex-1 overflow-hidden">
-        <Sidebar />
-        <Grid />
-      </div>
-
-    </div>
+    <AppShell>
+      {currentPage === 'dashboard' && <DashboardPage />}
+      {currentPage === 'editor' && <EditorPage />}
+      {currentPage === 'manage-rooms' && <ManageRoomsPage />}
+      {currentPage === 'manage-events' && <ManageEventsPage />}
+      {currentPage === 'navigation' && <NavigationPage />}
+    </AppShell>
   )
 }
