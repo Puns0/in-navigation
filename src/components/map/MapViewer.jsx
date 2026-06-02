@@ -3,7 +3,7 @@ import { useMapStore, COLS, ROWS } from '../../store/useMapStore'
 import { useShallow } from 'zustand/react/shallow'
 import { ROOM_TYPES } from '../../constants/roomTypes'
 import { MARKER_TYPES } from '../../constants/markerTypes'
-import { screenToGrid, clamp } from '../../utils/geometry'
+import { screenToGrid, clamp, drawWrappedText } from '../../utils/geometry'
 import { buildTypeIndex } from '../../utils/cellIndex'
 
 const TILE_SIZE = 24
@@ -184,7 +184,7 @@ export default function MapViewer({ mode, selectedRoomId, onRoomSelect, selected
       if (centerY < -100 || centerY > H + 100) continue
 
       const maxWidth = Math.max((groupW * ts) - 4, 1)
-      const fontSize = clamp(12 * z, 8, 16)
+      const fontSize = Math.max(8, 12 * z)
 
       const text = room.number
         ? `${room.number}${room.name ? ' · ' + room.name : ''}`
@@ -195,11 +195,8 @@ export default function MapViewer({ mode, selectedRoomId, onRoomSelect, selected
       ctx.textAlign = 'center'
       ctx.textBaseline = 'middle'
       
-      ctx.fillStyle = 'rgba(0,0,0,0.15)'
-      ctx.fillText(text, centerX + 1, centerY + 1, maxWidth)
-      
-      ctx.fillStyle = room.id === selectedRoomId && mode === 'rooms' ? '#fff' : 'rgba(255,255,255,0.9)'
-      ctx.fillText(text, centerX, centerY, maxWidth)
+      const fillPrimary = room.id === selectedRoomId && mode === 'rooms' ? '#fff' : 'rgba(255,255,255,0.9)'
+      drawWrappedText(ctx, text, centerX, centerY, maxWidth, fontSize * 1.2, fillPrimary, 'rgba(0,0,0,0.15)')
       ctx.restore()
     }
   }, [selectedRoomId, mode])

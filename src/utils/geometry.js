@@ -87,3 +87,38 @@ export function screenToGrid(clientX, clientY, pan, zoom, tileSize, containerRec
 export function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value))
 }
+
+/**
+ * Draws text with word wrapping.
+ */
+export function drawWrappedText(ctx, text, x, y, maxWidth, lineHeight, fillPrimary, fillShadow) {
+  if (!text) return
+  const words = text.split(' ')
+  const lines = []
+  let currentLine = words[0]
+
+  for (let i = 1; i < words.length; i++) {
+    const word = words[i]
+    const width = ctx.measureText(currentLine + " " + word).width
+    if (width < maxWidth) {
+      currentLine += " " + word
+    } else {
+      lines.push(currentLine)
+      currentLine = word
+    }
+  }
+  lines.push(currentLine)
+
+  const totalHeight = lines.length * lineHeight
+  let currentY = y - (totalHeight / 2) + (lineHeight / 2)
+
+  for (const line of lines) {
+    if (fillShadow) {
+      ctx.fillStyle = fillShadow
+      ctx.fillText(line, x + 1, currentY + 1, maxWidth)
+    }
+    ctx.fillStyle = fillPrimary
+    ctx.fillText(line, x, currentY, maxWidth)
+    currentY += lineHeight
+  }
+}

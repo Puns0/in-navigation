@@ -5,7 +5,7 @@ import { ROOM_TYPES } from '../../constants/roomTypes'
 import { NODE_TYPES } from '../../constants/nodeTypes'
 import { MARKER_TYPES } from '../../constants/markerTypes'
 import { TOOLS } from '../../constants/tools'
-import { interpolateCells, screenToGrid, clamp } from '../../utils/geometry'
+import { interpolateCells, screenToGrid, clamp, drawWrappedText } from '../../utils/geometry'
 import { buildTypeIndex } from '../../utils/cellIndex'
 import RoomPropertiesPopup from './RoomPropertiesPopup'
 import NodePropertiesPopup from './NodePropertiesPopup'
@@ -221,7 +221,7 @@ export default function Viewport() {
       if (centerY < -100 || centerY > H + 100) continue
 
       const maxWidth = Math.max((groupW * ts) - 4, 1)
-      const fontSize = clamp(12 * z, 8, 16)
+      const fontSize = Math.max(8, 12 * z) // Fixed small size that scales with zoom
 
       const text = room.number
         ? `${room.number}${room.name ? ' · ' + room.name : ''}`
@@ -231,10 +231,8 @@ export default function Viewport() {
       ctx.font = `600 ${fontSize}px 'Inter', sans-serif`
       ctx.textAlign = 'center'
       ctx.textBaseline = 'middle'
-      ctx.fillStyle = 'rgba(0,0,0,0.15)'
-      ctx.fillText(text, centerX + 1, centerY + 1, maxWidth)
-      ctx.fillStyle = 'rgba(0,0,0,0.7)'
-      ctx.fillText(text, centerX, centerY, maxWidth)
+      
+      drawWrappedText(ctx, text, centerX, centerY, maxWidth, fontSize * 1.2, 'rgba(0,0,0,0.7)', 'rgba(0,0,0,0.15)')
       ctx.restore()
     }
 
