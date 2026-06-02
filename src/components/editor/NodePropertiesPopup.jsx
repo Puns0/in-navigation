@@ -15,6 +15,10 @@ export default function NodePropertiesPopup({ nodeId, anchorX, anchorY, onClose 
 
   if (!node) return null
 
+  const roomSuggestions = Array.from(new Set(
+    floors.flatMap(f => f.rooms).flatMap(r => [r.name, r.number]).filter(Boolean)
+  )).sort()
+
   const handleSave = () => {
     updateNode(node.id, { label: label.trim() || null })
     onClose()
@@ -50,10 +54,16 @@ export default function NodePropertiesPopup({ nodeId, anchorX, anchorY, onClose 
             onChange={e => setLabel(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="e.g. Entrance A"
+            list="room-suggestions"
             className="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-sm text-white outline-none focus:border-purple-500"
           />
+          <datalist id="room-suggestions">
+            {roomSuggestions.map(sug => (
+              <option key={sug} value={sug} />
+            ))}
+          </datalist>
           <div className="text-[10px] text-slate-500 mt-1">
-            Name this node to make it available as a destination in routing.
+            Name this node to make it available as a destination in routing. Match exactly with a room name to enable auto-routing!
           </div>
         </div>
 
