@@ -182,7 +182,7 @@ export default function Viewport() {
     ctx.globalAlpha = 1.0
 
     // ── Draw walls ────────────────────────────────────────────────────
-    ctx.fillStyle = '#e2e8f0'
+    ctx.fillStyle = '#1e293b'
     Object.keys(floor.walls).forEach(wallKey => {
       const [wr, wc, dir] = wallKey.split(',')
       const r = parseInt(wr)
