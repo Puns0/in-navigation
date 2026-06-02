@@ -15,7 +15,7 @@ export default function CampusScreen({ onEnterBuilding }) {
       </div>
 
       {/* Interactive Marker */}
-      <div className="absolute top-[20%] left-[35%] -translate-x-1/2 -translate-y-1/2 z-20 flex flex-col items-center">
+      <div className="absolute top-[14%] left-[35%] -translate-x-1/2 -translate-y-1/2 z-20 flex flex-col items-center">
         <div className="text-xs font-bold bg-white text-slate-900 px-3 py-1 rounded-full shadow-lg mb-2 whitespace-nowrap border border-slate-200">
           Main Building
         </div>
