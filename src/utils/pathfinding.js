@@ -37,11 +37,15 @@ export function buildGraph(floors) {
       const s1 = staircases[i]
       const s2 = staircases[j]
       
-      // If they are on different floors but exactly same coordinates
-      if (s1.floorId !== s2.floorId && s1.row === s2.row && s1.col === s2.col) {
-        const dist = 5.0 // Staircase weight penalty
-        s1.edges.push({ to: s2.id, weight: dist })
-        s2.edges.push({ to: s1.id, weight: dist })
+      // Link staircases on different floors if they are reasonably close physically (within 10 grid cells)
+      if (s1.floorId !== s2.floorId) {
+        const dist2D = Math.hypot(s1.row - s2.row, s1.col - s2.col)
+        if (dist2D <= 10) {
+          const floorDiff = Math.abs(s1.floorId - s2.floorId)
+          const dist = (5.0 * floorDiff) + dist2D // Staircase weight penalty
+          s1.edges.push({ to: s2.id, weight: dist })
+          s2.edges.push({ to: s1.id, weight: dist })
+        }
       }
     }
   }
