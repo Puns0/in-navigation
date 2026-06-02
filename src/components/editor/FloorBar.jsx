@@ -39,7 +39,7 @@ export default function FloorBar() {
               }
             }
           }}
-          className="px-3 py-1 rounded text-xs font-medium transition-colors flex-shrink-0"
+          className="px-2 py-1 rounded text-xs font-medium transition-colors flex-shrink-0 flex items-center gap-1 group"
           style={
             activeFloorId === floor.id
               ? { background: 'var(--accent)', color: '#fff' }
@@ -47,7 +47,22 @@ export default function FloorBar() {
           }
           title={activeFloorId === floor.id ? floor.label : `Switch to ${floor.label} (right-click to delete)`}
         >
-          {floor.label}
+          <span className="px-1">{floor.label}</span>
+          {floors.length > 1 && (
+            <div
+              onClick={(e) => {
+                e.stopPropagation()
+                const hasContent = floor.rooms.length > 0 || floor.nodes.length > 0
+                if (!hasContent || confirm(`Delete "${floor.label}"? This cannot be undone.`)) {
+                  removeFloor(floor.id)
+                }
+              }}
+              className="w-4 h-4 flex items-center justify-center rounded-full opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-500 hover:text-white"
+              title={`Delete ${floor.label}`}
+            >
+              ×
+            </div>
+          )}
         </button>
       ))}
 

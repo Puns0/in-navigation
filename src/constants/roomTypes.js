@@ -7,6 +7,7 @@ export const ROOM_TYPES = {
   room:         { id: 'room',         label: 'Room',           color: '#93c5fd', category: 'indoor' },
   corridor:     { id: 'corridor',     label: 'Corridor',       color: '#a1a1aa', category: 'indoor' },
   staircase:    { id: 'staircase',    label: 'Staircase',      color: '#86efac', category: 'indoor' },
+  door:         { id: 'door',         label: 'Door',           color: '#d97706', category: 'indoor' },
   toilet:       { id: 'toilet',       label: 'Toilet',         color: '#67e8f9', category: 'indoor' },
   construction: { id: 'construction', label: 'Construction',   color: '#fca5a5', category: 'utility' },
   garden:       { id: 'garden',       label: 'Garden',         color: '#4ade80', category: 'outdoor' },
